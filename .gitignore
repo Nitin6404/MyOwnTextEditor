@@ -1,1 +1,4 @@
 kilo-src
+
+// remove the editor file comes after compiling the editor.c file
+editor
