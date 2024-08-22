@@ -5,28 +5,40 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <errno.h>
+#include <sys/ioctl.h>
 
 // Defines //
 #define CTRL_KEY(k) ((k) & 0x1f)
 
 // Data //
-struct termios orig_termios;
+struct editorConfig{
+    int screenrows;
+    int screencols;
+    struct termios orig_termios;
+};
+
+struct editorConfig E;
+
+// Prototypes //
+void editorRefreshScreen(void);
+void editorProcessKeypress(void);
 
 // Terminal //
-void die(const char *s){
+void die(const char *s) {
+    editorRefreshScreen(); // Clear screen
     perror(s); // Print error message
     exit(1); // Exit program
 }
 
 void disableRawMode() {
-    if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios) == -1){ // Set terminal settings to original settings
+    if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios) == -1){ // Set terminal settings to original settings
         die("tcsetattr"); // Print error message and exit program
     }
 }
 
 void enableRawMode() {
    if (isatty(STDIN_FILENO)) {
-        if (tcgetattr(STDIN_FILENO, &orig_termios) == -1) {
+        if (tcgetattr(STDIN_FILENO, &E.orig_termios) == -1) {
             die("tcgetattr");
         }
     } else {
@@ -35,7 +47,7 @@ void enableRawMode() {
 
     atexit(disableRawMode);  // Register disableRawMode to be called on exit
 
-    struct termios raw = orig_termios;
+    struct termios raw = E.orig_termios;
     raw.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON); // Disable Ctrl-C, Ctrl-V, Ctrl-S, Ctrl-Q, Ctrl-O
     raw.c_oflag &= ~(OPOST); // Disable output processing
     raw.c_cflag |= (CS8);  // Set character size to 8 bits per byte
@@ -58,22 +70,62 @@ char editorReadKey() {
   return c;
 }
 
+// Get Window Size //
+int getWindowSize(int *rows, int *cols){
+    struct winsize ws;
+    
+    if(ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0){
+        return -1;
+    } else {
+        *cols = ws.ws_col;
+        *rows = ws.ws_row;
+        return 0;
+    }
+}
+
+// Draw ~ //
+void editorDrawRows() {
+  int y;
+  for (y = 0; y < E.screenrows; y++) {
+    write(STDOUT_FILENO, "~\r\n", 3);
+  }
+}
+
+// Output //
+void editorRefreshScreen() {
+    write(STDOUT_FILENO, "\x1b[2J", 4); // Clear screen
+    write(STDOUT_FILENO, "\x1b[H", 3); // Reposition cursor
+
+    editorDrawRows();
+    write(STDOUT_FILENO, "\x1b[H", 3); // Reposition cursor
+}
+
 // Input //
 void editorProcessKeypress() {
     char c = editorReadKey();
     
     switch (c) {
         case CTRL_KEY('q'):
+            editorRefreshScreen();
             exit(0);
             break;
   }
 }
 
+// Init Editor //
+void initEditor() {
+    if(getWindowSize(&E.screenrows, &E.screencols) == -1){
+        die("getWindowSize");
+    }
+}
+
 // Init //
 int main() {
     enableRawMode();
+    initEditor();
     
   while (1) {
+    editorRefreshScreen();
     editorProcessKeypress();
   }
     
